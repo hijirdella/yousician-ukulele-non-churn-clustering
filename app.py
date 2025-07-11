@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import joblib
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.decomposition import PCA
 
 # === Konfigurasi Halaman ===
 st.set_page_config(page_title="Ukulele by Yousician - Non-Churn User Clustering", layout="wide")
@@ -78,7 +81,36 @@ else:
                     st.success(f"📈 {len(df_nonchurn)} user non-churn berhasil diklasterisasi.")
                     st.dataframe(df_nonchurn)
 
-                    # Tombol download
+                    # === Visualisasi: PCA 2D ===
+                    st.markdown("### 🔍 Visualisasi PCA (2D)")
+                    pca = PCA(n_components=2)
+                    pca_result = pca.fit_transform(X_scaled)
+                    df_nonchurn['PCA1'] = pca_result[:, 0]
+                    df_nonchurn['PCA2'] = pca_result[:, 1]
+
+                    fig_pca, ax_pca = plt.subplots()
+                    sns.scatterplot(data=df_nonchurn, x="PCA1", y="PCA2", hue="Cluster_Label", palette="Set2", s=60, ax=ax_pca)
+                    ax_pca.set_title("PCA - 2D Projection of Clusters")
+                    st.pyplot(fig_pca)
+
+                    # === Visualisasi: Heatmap Korelasi ===
+                    st.markdown("### 🌡️ Korelasi Antar Fitur")
+                    corr_matrix = df_nonchurn[feature_names_batch].corr()
+                    fig_corr, ax_corr = plt.subplots(figsize=(10, 6))
+                    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", ax=ax_corr)
+                    ax_corr.set_title("Correlation Heatmap")
+                    st.pyplot(fig_corr)
+
+                    # === Visualisasi: Profil Segmentasi ===
+                    st.markdown("### 📦 Segment Profile (Boxplot per Fitur)")
+                    selected_features = st.multiselect("Pilih fitur yang ingin divisualisasikan:", feature_names_batch, default=feature_names_batch[:3])
+                    for feat in selected_features:
+                        fig_box, ax_box = plt.subplots()
+                        sns.boxplot(data=df_nonchurn, x="Cluster_Label", y=feat, palette="Set2", ax=ax_box)
+                        ax_box.set_title(f"{feat} by Cluster")
+                        st.pyplot(fig_box)
+
+                    # === Tombol Download CSV ===
                     csv = df_nonchurn.to_csv(index=False).encode('utf-8')
                     st.download_button("💾 Download Hasil Non-Churned Users", csv, "nonchurned_clustered_users.csv", "text/csv")
 
