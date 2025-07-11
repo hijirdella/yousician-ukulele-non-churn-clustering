@@ -1,102 +1,86 @@
 import streamlit as st
-import joblib
 import pandas as pd
-from datetime import datetime
-import pytz
+import joblib
 
-# --- Load model dan komponen ---
-model = joblib.load('RidgeClassifier - Perfect Piano.pkl')
-vectorizer = joblib.load('tfidf_vectorizer_Perfect Piano.pkl')
-label_encoder = joblib.load('label_encoder_Perfect Piano.pkl')
+# === Konfigurasi Halaman ===
+st.set_page_config(page_title="Ukulele by Yousician - Non-Churn User Clustering", layout="wide")
+st.title("🪕 Ukulele by Yousician - Non-Churn User Clustering App")
 
-# --- Judul App ---
-st.title("🎹 Sentiment Analysis - Perfect Piano App")
+# === Mapping Label Klaster ===
+label_mapping = {
+    0: "Consistent Engagers",
+    1: "Low Commitment Users",
+    2: "High Performing Explorers"
+}
 
-# --- Pilih Mode ---
-st.header("Pilih Metode Input")
-input_mode = st.radio("Mode Input:", ["📝 Input Manual", "📁 Upload CSV"])
+# === Pilih Mode Input ===
+input_mode = st.radio("Pilih Mode Input:", ["👤 Input Manual (1 Pengguna)", "📁 Upload CSV (Batch Pengguna)"])
 
-# ========================================
-# 📌 MODE 1: INPUT MANUAL
-# ========================================
-if input_mode == "📝 Input Manual":
-    st.subheader("Masukkan 1 Review Pengguna")
+# === MODE 1: INPUT MANUAL UNTUK 1 USER ===
+if input_mode == "👤 Input Manual (1 Pengguna)":
+    st.subheader("Masukkan Data Pengguna")
 
-    name = st.text_input("👤 Nama Pengguna:")
-    star_rating = st.selectbox("⭐ Bintang Rating:", [1, 2, 3, 4, 5])
-    user_review = st.text_area("💬 Review:")
+    # Load model dan scaler
+    model_1user = joblib.load("kmeans_nonchurned_model_1user.pkl")
+    scaler_1user = joblib.load("scaler_clustering_nc_1user.pkl")
+    feature_names_1user = joblib.load("clustering_feature_names_nc1user.pkl")
 
-    # Gunakan waktu default dalam zona Asia/Jakarta
-    wib = pytz.timezone("Asia/Jakarta")
-    now_wib = datetime.now(wib)
+    # Input manual
+    user_input = {}
+    for feat in feature_names_1user:
+        user_input[feat] = st.number_input(f"{feat}", value=0.0)
 
-    review_day = st.date_input("📅 Tanggal Submit:", value=now_wib.date())
-    review_time = st.time_input("⏰ Waktu Submit:", value=now_wib.time())
+    predicted_churn = st.selectbox("Apakah Predicted_Churn user ini?", [0, 1])
 
-    # Gabungkan tanggal dan waktu (tanpa menggeser waktu)
-    review_datetime = datetime.combine(review_day, review_time)
-    review_datetime_wib = wib.localize(review_datetime)
-    review_date_str = review_datetime_wib.strftime("%Y-%m-%d %H:%M")
-
-    if st.button("Prediksi Sentimen"):
-        if user_review.strip() == "":
-            st.warning("🚨 Silakan isi review terlebih dahulu.")
+    if st.button("🧭 Prediksi Cluster"):
+        if predicted_churn == 0:
+            input_df = pd.DataFrame([user_input])
+            input_scaled = scaler_1user.transform(input_df)
+            cluster = model_1user.predict(input_scaled)[0]
+            label = label_mapping.get(cluster, f"Cluster {cluster}")
+            st.success(f"✅ User ini diprediksi **tidak churn** dan berada pada Cluster: **{label}**")
         else:
-            vec = vectorizer.transform([user_review])
-            pred = model.predict(vec)
-            label = label_encoder.inverse_transform(pred)[0]
+            st.info("ℹ️ User ini churn. Tidak dilakukan pemetaan klaster.")
 
-            # Buat hasil sebagai DataFrame
-            result_df = pd.DataFrame([{
-                "name": name if name else "(Anonim)",
-                "star_rating": star_rating,
-                "date": review_date_str,
-                "review": user_review,
-                "predicted_sentiment": label
-            }])
-
-            st.success("✅ Prediksi berhasil!")
-            st.dataframe(result_df)
-
-            # Tombol Download
-            csv_manual = result_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download Hasil Manual sebagai CSV",
-                data=csv_manual,
-                file_name="manual_review_prediction_perfect_piano.csv",
-                mime="text/csv"
-            )
-
-# ========================================
-# 📁 MODE 2: UPLOAD CSV
-# ========================================
+# === MODE 2: UPLOAD CSV UNTUK BANYAK USER ===
 else:
-    st.subheader("Upload File CSV Review")
-    uploaded_file = st.file_uploader("Pilih file CSV (harus memiliki kolom 'review')", type=['csv'])
+    st.subheader("Unggah File CSV")
 
-    if uploaded_file:
+    # Load model dan scaler
+    model_batch = joblib.load("kmeans_nonchurned_batch_model.pkl")
+    scaler_batch = joblib.load("scaler_nc_clustering_batch.pkl")
+    feature_names_batch = joblib.load("nc_clustering_feature_names_batch.pkl")
+
+    uploaded_file = st.file_uploader("Unggah file CSV dengan fitur yang sesuai", type=["csv"])
+
+    if uploaded_file is not None:
         try:
             df = pd.read_csv(uploaded_file)
+            st.write("📄 Preview Data (semua user):", df.head())
 
             # Validasi kolom
-            if 'review' not in df.columns:
-                st.error("❌ File harus memiliki kolom 'review'.")
+            required_columns = set(feature_names_batch + ["Predicted_Churn"])
+            if not required_columns.issubset(df.columns):
+                st.error(f"❌ File harus memuat kolom: {required_columns}")
             else:
-                # Prediksi
-                X_vec = vectorizer.transform(df['review'].fillna(""))
-                y_pred = model.predict(X_vec)
-                df['predicted_sentiment'] = label_encoder.inverse_transform(y_pred)
+                df_nonchurn = df[df["Predicted_Churn"] == 0].copy()
 
-                st.success("✅ Prediksi berhasil!")
-                st.dataframe(df.head())
+                if df_nonchurn.empty:
+                    st.warning("⚠️ Tidak ada user dengan Predicted_Churn = 0.")
+                else:
+                    X = df_nonchurn[feature_names_batch]
+                    X_scaled = scaler_batch.transform(X)
+                    clusters = model_batch.predict(X_scaled)
 
-                # Download hasil
-                csv_result = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download Hasil CSV",
-                    data=csv_result,
-                    file_name="predicted_reviews_perfect_piano.csv",
-                    mime="text/csv"
-                )
+                    df_nonchurn['Predicted_Cluster'] = clusters
+                    df_nonchurn['Cluster_Label'] = df_nonchurn['Predicted_Cluster'].map(label_mapping)
+
+                    st.success(f"📈 {len(df_nonchurn)} user non-churn berhasil diklasterisasi.")
+                    st.dataframe(df_nonchurn)
+
+                    # Tombol download
+                    csv = df_nonchurn.to_csv(index=False).encode('utf-8')
+                    st.download_button("💾 Download Hasil Non-Churned Users", csv, "nonchurned_clustered_users.csv", "text/csv")
+
         except Exception as e:
-            st.error(f"❌ Terjadi error saat membaca file: {e}")
+            st.error(f"⚠️ Terjadi kesalahan saat membaca file: {e}")
